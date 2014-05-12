@@ -6,5 +6,6 @@ categories: update
 ---
 
 As I will soon leave Inria, I need a new place to host my personal web
-page. After many hesitation, I settled for a simple page on
-github. 
+page. After many hesitation, I settled for a simple page on GitHub,
+using Jekyll as a CMS. More info
+[here](https://help.github.com/articles/using-jekyll-with-pages)
