@@ -1,0 +1,16 @@
+---
+layout: post
+title:  "Paper accepted for publication at ITP 2014"
+date:   2014-04-21 20:00:00
+categories: update
+---
+
+Our paper **Compositional Computational Reflection**, [Gregory
+Malecha](http://www.people.fas.harvard.edu/~gmalecha/), [Adam
+Chlipala](http://adam.chlipala.net/) and Thomas Braibant has been
+accepted for publication at [ITP
+2014](http://www.cs.uwyo.edu/~ruben/itp-2014/). Draft avalaible
+[here]({{ site.url }}/assets/pdf/itp-2014.pdf). See you at FLOC,
+folks.
+
+
