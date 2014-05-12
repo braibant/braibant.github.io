@@ -1,0 +1,28 @@
+---
+layout: post
+title:  "Paper accepted for publication in JAR"
+date:   2014-05-12 20:00:00
+categories: update
+---
+
+Our paper **Implementing and reasoning about hash-consed data
+structures in Coq**, Thomas Braibant, Jacques-Henri Jourdan and [David
+Monniaux](http://www-verimag.imag.fr/~monniaux/) has been accepted for
+publication in JAR. Latest draft avalaible 
+[here]({{site.url}}/assets/pdf/jar-2014.pdf). The code is available
+[here](https://github.com/braibant/hash-consing-coq).
+
+---
+
+# Abstract
+
+We report on four different approaches to implementing hash-consing in
+Coq programs. The use cases include execution inside Coq, or execution
+of the extracted OCaml code. We explore the different trade-offs
+between faithful use of pristine extracted code, and code that is
+fine-tuned to make use of OCaml programming constructs not available
+in Coq. We discuss the possible consequences in terms of performances
+and guarantees.  We use the running example of binary decision
+diagrams and then demonstrate the generality of our solutions by
+applying them to other examples of hash-consed data structures.
+
