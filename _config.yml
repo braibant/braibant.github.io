@@ -1,5 +1,5 @@
 name: Thomas's blog
-markdown: redcarpet
+markdown:  redcarpet
 pygments: true
 analytics :
   provider : google
