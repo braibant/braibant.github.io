@@ -1,7 +1,7 @@
 ---
 layout: post
 title:  "BDDs in OCaml (2)"
-date:   2014-06-17 20:00:00
+date:   2014-06-30 20:00:00
 categories: update
 ---
 {% include mathjax.html %}
