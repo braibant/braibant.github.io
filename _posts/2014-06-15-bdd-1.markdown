@@ -1,0 +1,239 @@
+---
+layout: post
+title:  "BDDs in OCaml (1)"
+date:   2014-06-17 20:00:00
+categories: update
+---
+{% include mathjax.html %}
+
+Binary decision diagrams (BDDs in short) are a staple of computer
+science, that are used to represent Boolean functions in a compact
+manner. BDDs are described at length in the volume 4, fascicule 1 of
+Knuth's "The art of computer programming", who calls them
+"wonderful". In the last few months, I have been playing a lot with
+BDDs and related structures, and the more I play with them the more I
+love them too.
+
+In this post, I will present the basics of the implementation of a BDD
+library in OCaml. 
+
+---
+
+### A primer on binary decision diagrams
+
+Most of the time, the term BDDs refers to *reduced ordered binary
+decision diagrams*, which are a canonical representation of a Boolean
+function (for a given variable order). That is, two BDDs are equal if
+and only if they represent the same Boolean function. How do we move
+from a Boolean function \\(f: \\{0,1\\}^n \to \\{0,1\\}\\) to a BDD?  
+
+First, any Boolean function with \\(n\\) variables can be represented
+as a complete tree with \\(2^n-1\\) decision nodes labelled by
+variable \\(x\_k\\) and leaves labeled \\(T\\) (for true) and \\(F\\)
+(for false). If the order in which variables appears is the same in
+each branch of the tree, then it is called *ordered* (and the index
+\\(k\\) of each variable \\(x_k\\) corresponds to the depth of the
+node).
+
+Such a tree can be *reduced* by merging identical sutrees and removing
+decision nodes with identical children. Since these transformations
+preserve semantics, the resulting directed acyclic graph represent the
+same Boolean function as we started with. Moreover, this reduced
+representation is *canonical*. 
+
+In practice, one directly constructs the DAG using
+*hash-consing*. This is the subject of the next section.
+
+### A primer on hash-consing 
+
+Hash-consing is a programming technique to share identical values in
+memory, keeping a single representative of each class of equivalent
+objects in memory. When creating an object, one first performs a lookup
+in a global hash table to check whether an equivalent object already
+exists. If it is the case, this object is returned. Otherwise, one
+proceeds with the object creation and inserts it in the table. If
+hash-consing is used systematically, it makes it possible to get
+*maximal sharing* between objects. 
+
+It is also possible to give a unique identifier to each object, for
+instance an integer. This yields a fast way to hash objects (just use
+their unique identifier as the hash value), and to compare objetcs
+(just comparing their unique identifiers). Later on, this will serve
+as the basis for *memoization*. 
+
+### Implementing hash-consing of BDDs in OCaml
+
+In this section, we are going to implement the basis of a BDD library
+from scratch. First, we need some boilerplate code to define the type
+of unique identifiers and the type of variables (in both cases, just
+integers).
+
+{% highlight ocaml %}
+type uid = int
+
+module Var = struct 
+  type t = int
+  let compare (x: t) (y: t) = Pervasives.compare x y
+  let equal (x: t) (y:t) = x = y
+  let hash (x: t) = x
+end
+{% endhighlight %}
+
+We are now ready to define the abstract syntax *trees* of binary
+decision *diagrams*.
+
+{% highlight ocaml %}
+type t = 
+| T 					(* true leaf *)
+| F					(* false leaf *)
+| N of node				(* decision node *)
+and node = {uid: uid; var: var; low: t; high:t }
+{% endhighlight %}
+
+The trick to build diagrams instead of trees is to enforce the
+following property: one never creates a new node if an semantically
+identical one already exists. In order to do so, we give each node a
+unique identifier (e.g., the current value of a global counter) and
+maintain the property that two nodes are equivalent if and only if
+they have the same unique identifer. 
+
+Now, we need to bootstrap this process somehow. Suppose that I have
+one existing node `n1` and a new node `n2`. I suppose that the
+children of `n1` and `n2` have the maximal sharing property and that
+they are properly hash-consed. How do I know that `n1` and `n2` are
+equivalent? Walking down the diagrams to test for structural equality
+is not an option: we aim for something that runs in constant time. The
+solution is simply to compare the structural parts of the nodes. That
+is, compare the variables, the unique identifiers of the `low`
+children and the unique identifiers of the `high` children. This is
+what the `node_equal` function below does. 
+
+{% highlight ocaml %}
+let uid = function 
+  | T -> 0
+  | F -> 1
+  | N n -> n.uid       (* 2 <= n.uid *)
+
+let node_equal n1 n2 =
+  Var.compare n1.var n2.var = 0
+  && uid n1.low = uid n2.low 
+  && uid n1.high = uid n2.high
+{% endhighlight %}
+
+To hash-cons a new node `n2` whose unique identifier is equal to the
+current value of the global unique identifier counter, one simply
+walks through the existing nodes `n1` and checks whether one
+equivalent node exists. If it is the case, one returns the existing
+`n1` node. Otherwise, one bumps the global counter and returns `n2`.
+
+In practice, maintaining a set of hash-consed nodes would prevent the
+nodes that are not used anymore to be reclaimed by the garbage
+collector. We need a data structure that makes it possible to collect
+unreachable nodes. To do so, we turn to OCaml [weak hash
+sets](http://caml.inria.fr/pub/docs/manual-ocaml/libref/Weak.html)
+which are a way to build sets of values where each value may magically
+disappear if it is not used by the program anymore.
+
+{% highlight ocaml %}
+module H = struct
+  type t = node
+  let equal = node_equal
+  let hash n = 
+    let (+) x y = x * 3571 + y in 
+    (Var.hash n.var + uid n.low + uid n.high) land max_int
+end
+
+module W = Weak.Make(H)
+{% endhighlight %}
+
+The `W` module contains many operations over a weak hash set of nodes,
+but we are only going to use two of them: `create`, which creates a
+new empty weak hash set; and `merge t x` which returns an instance of
+`x` found in the weak hash set `t` if one exists, or add `x` to `t`
+and returns it. (In this context, an instance means an element which
+is equal to `x` modulo the H.equal relation.) We are now ready to
+define our *smart constructor* for BDD nodes which hash-conses nodes
+and reduces nodes on the fly (if the two children are equivalent).
+
+{% highlight ocaml %}
+let table = W.create 1337 (* weak hash set*)
+let next_uid = ref 2      (* global uid counter *)
+
+let mk_node var low high =
+  if uid low = uid high 			
+  then low
+  else 
+    begin 
+      let n1 = {uid = !next_uid; var; low; high} in 
+      let n2 = WHT.merge table n1 in 
+      if n1 == n2 
+      then incr next_uid;
+      N n2
+    end
+{% endhighlight %}
+ 
+We can prove that this function returns diagrams that are maximally
+shared and reduced if its arguments have the same properties. If we
+ensure that our diagrams are ordered, then the following equality test
+is a correct and complete characterization of the semantic equivalence
+of Boolean functions.
+
+{% highlight ocaml %}
+let equal (x: t) (y: t) : bool = uid x = uid y
+{% endhighlight %}
+
+Also, we can use this smart constructor to actually build BDDs. For
+instance, the following function builds the BDDs that corresponds to
+the Boolean expression \\(x\_i\\).
+{% highlight ocaml %}
+let var (i: int) = mk_node i F T
+{% endhighlight %}
+
+We can check that the nodes that are created with `var` are actually
+shared: the unique identifiers of `x` and `y` below are the same.
+
+{% highlight ocaml %}
+let x = var 0 
+let y = var 0
+let _ = assert (uid x = uid y)
+let _ = assert (x == y)
+{% endhighlight %}
+
+We also remark that `x` and `y` are physically equal (that is, they
+correspond to the same memory location).  Actually, in the current
+version of this code, we could have used `==` to implement `equal`. We
+will comment on this in a later blog post.
+
+Finally, we can also check that unused nodes are sometime reclaimed by
+the GC. The following code only allocate two nodes, that are reclaimed
+if `f` is called again. 
+{% highlight ocaml %}
+let f () =   
+  Gc.major ();
+  for i = 0 to 100 do
+    ignore (var 0);
+    Printf.printf "%i " !next_uid;
+    ignore (var 1);
+    Printf.printf "%i " !next_uid;
+    ignore (var 2);
+    Printf.printf "%i " !next_uid;
+    ()
+  done
+{% endhighlight %}
+
+### Wrapping up
+
+What's missing from this post is the ability to build more involved
+BDDs and to compose them (for instance, taking the disjunction or the
+conjunction of two BDDs). This will be the subject of the next post,
+in which we will explore BDD operations and memoization
+patterns. Then, we will turn to a really exciting part of BDD
+algorithms, that is, reordering variables to optimize the size of the
+diagrams. 
+
+
+
+
+
+
+

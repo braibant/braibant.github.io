@@ -1,0 +1,214 @@
+---
+layout: post
+title:  "BDDs in OCaml (2)"
+date:   2014-06-17 20:00:00
+categories: update
+---
+{% include mathjax.html %}
+
+In the last blog post, I explained what are Binary Decision
+Diagrams. From an implementation point of view, I presented how to
+implement *maximal sharing* via hash-consing.
+
+In this blog post, we will look at the implementation of the usual
+operations on logical formulas, and how they translate on BDDs. One of
+the meaty part of this blog post will be the discussion of
+*memoization* of operations. As we will see, memoization of BDD
+operations is necessary to get decent performances out of a BDD
+library; yet there are many ways to implement this memoization, and
+their mileage may vary under the circumstances.
+
+---
+
+### A primer on Shannon's expansion
+
+Recall that the term BDDs refers *reduced ordered binary decision
+diagrams* and that these are canonical representations of Boolean
+functions. The big question about BDDs is the following one: suppose
+that I have the BDDs for two functions $ f $ and $ g $, how do we
+compute the BDD for functions like $ f \vee g $ or $ f \oplus g $?
+It turns out that there is an efficient way to compose BDDs to build
+new BDDs that are reduced and ordered by construction and this one of
+the reason why BDDs became so popular.
+
+The idea is quite elegant. Recall that any function $f(x\_1, ...,
+x\_n)$ can be decomposed as $$ x\_1 \cdot f (1, ..., x\_n) +
+\overline{x\_1} \cdot f (0, ..., x\_n)$$ The two terms that appear in
+this expression are called the Shannons's cofactors of $ f $ and we
+will denote them by $~f\_{x\_1}$ and $~f\_{\overline{x\_1}}$. What is
+interesting here is that the decision diagram for $f$ starts with a
+node for the variable $x\_1$ if and only if the two cofactors of $f$
+with respect to $x\_1$ are different; and there is a clear
+correspondence between cofactors and sub-diagrams.
+
+Now, let's consider two functions $f$ and $g$. To compute the diagram
+for $f \vee g$, we first find what's the variable that should appear
+at the root of the diagram: that's either the head variable of $f$ or
+the head variable of $g$, and we pick the one which has the lowest
+index $i$. Now, we compute the cofactors of $f$ and $g$ with respect
+to this variable. We have $$ f \vee g = x\_i \cdot (f\_{x\_i} \vee
+g\_{x\_i}) + \overline{x\_i} \cdot (f\_{\overline{x\_i}} \vee
+g\_{\overline{x\_i}}) $$ That equation means that the diagram for $f
+\vee g$ can be expressed in terms of the diagrams for two recursive
+calls on "smaller" diagrams, and this nice property holds for any
+(binary) Boolean operation. Without going too much into details, all
+these operations can be expressed in terms of *node melding*, which
+corresponds to an in-order traversal of BDD nodes. This combinator
+boils down to the ideas above plus the fact that its behavior is
+entirely defined by the results on the leaves of diagrams.
+
+### Intermezzo: implementing the conjunction of BDDs
+
+In this section, we depart from general considerations on the
+implementation of BDD operations to actually implement one. Doing so,
+we will illustrate the ideas above and highlight the shortcomings of
+this first try. (**Note**: if you are interested in *good* implementations
+of BDD operations, make sure to read the remainder of this post too.)
+
+{% highlight ocaml %}
+let rec andb x y = 
+  match x, y with 
+  | F, _ | _, F -> F (* false is the zero element for andb *)
+  | T, r | r, T -> r (* true is the identity element for andb *)
+  | N {var = var1; low = low1; high = high1; _}, 
+    N {var = var2; low = low2; high = high2; _} -> 
+    let cmp = Var.compare var1 var2 in 
+    if cmp < 0
+    then (* var1 < var2 *)
+      mk_node var1 (andb low1 y) (andb high1 y)
+    else if cmp = 0 
+    then (* var1 = var2  *)
+      mk_node var1 (andb low1 low2) (andb high1 high2)
+    else (* var1 > var2 *)
+      mk_node var2 (andb x low2) (andb x high2)
+{% endhighlight %}
+
+The first two lines of the pattern matching are direct consequences of
+the definition of the conjunction: false is the zero element for the
+logical and (false and anything is equal to false), and true is its
+neutral element.  The interesting part of this function is the last
+case of the pattern-matching. in this code, we check what is the order
+between the head variables of the two arguments to pick the smallest
+one. Then, we compute the the cofactors of `x` and `y` with respect to
+this variable and perform recursive calls on these cofactors, and
+re-assemble the results by constructing a new node using our smart
+constructor `mk_node`. (To understand how it works, it might be useful
+to convince yourself that the cofactors of `y` w.r.t. `var1` in the
+first `then` branch are indeed `y`. The other cases are similar.)
+
+
+**Exercise** How would you modify the code above to implement the
+   logical or rather than the logical and?
+
+### Getting things right: memoizing functions 
+
+There is one huge problem with the above implementations: it's runtime
+cost is exponential w.r.t. the size of the diagrams. The problem comes
+from the fact that the function might end up evaluated exponentially
+often on the same couple of subterms. Indeed, our implementation is
+oblivious to the fact that there is some sharing in the BDDs, and ends
+up processing BDDs as if they were mere Binary Decision Trees. The
+goal of this section is to present an example of the *memoization
+techniques* that are needed to get efficient implementations of BDD
+operations.
+
+In a nutshell, each time we perform a call to `andb`, we want to check
+in a cache whether this particular problem has been solved already. If
+it is the case, we can just return the cached value. If it is not the
+case, then we perform the computations as described above and perform
+recursive calls on the sub-problems.  Note that there is nothing
+specific to a particular caching strategy in this story, thus our code
+should abstract from the strategy. One nice way to achieve that is to
+use a programming pattern called *open recursion*.
+
+{% highlight ocaml %}
+let andb andb x y = 
+  match x, y with 
+  | F, _ | _, F -> F 			(* false is the zero element for andb *)
+  | T, r | r, T -> r			(* true is the identity element for andb *)
+  | N {var = var1; low = low1; high = high1; _}, 
+    N {var = var2; low = low2; high = high2; _} -> 
+    let cmp = Var.compare var1 var2 in 
+    if cmp < 0
+    then (* var1 < var2 *)
+      mk_node var1 (andb low1 y) (andb high1 y)
+    else if cmp = 0 
+    then (* var1 = var2  *)
+      mk_node var1 (andb low1 low2) (andb high1 high2)
+    else (* var1 > var2 *)
+      mk_node var2 (andb x low2) (andb x high2)
+{% endhighlight %}
+
+The code above is not recursive anymore; rather, we delayed the
+definition of the way this function calls itself to a later
+point.
+
+The most simple memoization strategy consists in storing the values
+that have been computed in an hash-table, whose keys are pairs of BDDs
+and whose values are other BDDs. It is trivial to instanciate the
+`Hashtbl.Make` functor to get hash tables that are specialized for our
+efficient equality test and hash functions. 
+
+{% highlight ocaml %}
+type bdd = t
+
+module H2 = struct
+  type t = bdd * bdd
+  let equal (a1,b1) (a2,b2) =
+    uid a1 = uid a2   && uid b1 = uid b2
+  let hash (a,b) = uid a * 17 + uid b
+end
+  
+module HT2 = Hashtbl.Make(H2)
+{% endhighlight %}
+
+We are now ready to implement the function that tie the knot of an
+open recursive function. 
+
+{% highlight ocaml %}
+let memo_rec2 f = 
+  let h = HT2.create 1337 in 
+  let rec g x y = 
+    try HT2.find h (x,y)
+    with Not_found ->  f g x y
+  in 
+  g
+
+let andb = memo_rec2 andb
+{% endhighlight %}
+
+**Exercise** How would you modify the code above to implement the
+   logical or rather than the logical and?
+
+**Exercise** How would you modify the code above to implement the
+   logical exclusive-or? (Hint: you may want to implement the negation
+   operation first.)
+
+### Going further
+
+There are many different ways to implement the memoizing combinators,
+with different performance and memory consumption profiles. For
+instance, the combinator that we used above ensures that the
+memoization tables are complete, but have an ever increasing memory
+footprint. We could also reset the memoization tables from one run of
+an operation to the other (that is, recreating the table `h` for each
+top-level call of `memo_rec2 f x y`). Or, we could add alarms to
+OCaml's GC to clear the memoization tables. Or we could have a fixed
+size table and knock out the existing key-value pairs when there is a
+collision (this corresponds to a degenerate hash table in which
+buckets are not lists nor trees, but singletons). These are really
+simple variations and your mileage using them may vary.
+
+One more advanced memoization strategy involves the use of something
+called ephemerons, which make it possible to automatically reclaim the
+stale bindings that are stored in the memoization tables. We will come
+back to this subject in a future post.
+
+
+
+
+
+
+
+
+

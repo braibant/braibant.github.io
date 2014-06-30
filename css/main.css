@@ -16,5 +16,5 @@ body {padding-bottom: 70px;}
 #footer {
   height: 60px;
   display: block;
-  background-color: @blue;
+  background-color: white;
 }
