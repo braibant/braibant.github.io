@@ -66,17 +66,17 @@ this first try. (**Note**: if you are interested in *good* implementations
 of BDD operations, make sure to read the remainder of this post too.)
 
 {% highlight ocaml %}
-let rec andb x y = 
-  match x, y with 
+let rec andb x y =
+  match x, y with
   | F, _ | _, F -> F (* false is the zero element for andb *)
   | T, r | r, T -> r (* true is the identity element for andb *)
-  | N {var = var1; low = low1; high = high1; _}, 
-    N {var = var2; low = low2; high = high2; _} -> 
-    let cmp = Var.compare var1 var2 in 
+  | N {var = var1; low = low1; high = high1; _},
+    N {var = var2; low = low2; high = high2; _} ->
+    let cmp = Var.compare var1 var2 in
     if cmp < 0
     then (* var1 < var2 *)
       mk_node var1 (andb low1 y) (andb high1 y)
-    else if cmp = 0 
+    else if cmp = 0
     then (* var1 = var2  *)
       mk_node var1 (andb low1 low2) (andb high1 high2)
     else (* var1 > var2 *)
@@ -100,7 +100,7 @@ first `then` branch are indeed `y`. The other cases are similar.)
 **Exercise** How would you modify the code above to implement the
    logical or rather than the logical and?
 
-### Getting things right: memoizing functions 
+### Getting things right: memoizing functions
 
 There is one huge problem with the above implementations: it's runtime
 cost is exponential w.r.t. the size of the diagrams. The problem comes
@@ -122,17 +122,17 @@ should abstract from the strategy. One nice way to achieve that is to
 use a programming pattern called *open recursion*.
 
 {% highlight ocaml %}
-let andb andb x y = 
-  match x, y with 
+let andb andb x y =
+  match x, y with
   | F, _ | _, F -> F 			(* false is the zero element for andb *)
   | T, r | r, T -> r			(* true is the identity element for andb *)
-  | N {var = var1; low = low1; high = high1; _}, 
-    N {var = var2; low = low2; high = high2; _} -> 
-    let cmp = Var.compare var1 var2 in 
+  | N {var = var1; low = low1; high = high1; _},
+    N {var = var2; low = low2; high = high2; _} ->
+    let cmp = Var.compare var1 var2 in
     if cmp < 0
     then (* var1 < var2 *)
       mk_node var1 (andb low1 y) (andb high1 y)
-    else if cmp = 0 
+    else if cmp = 0
     then (* var1 = var2  *)
       mk_node var1 (andb low1 low2) (andb high1 high2)
     else (* var1 > var2 *)
@@ -147,7 +147,7 @@ The most simple memoization strategy consists in storing the values
 that have been computed in an hash-table, whose keys are pairs of BDDs
 and whose values are other BDDs. It is trivial to instanciate the
 `Hashtbl.Make` functor to get hash tables that are specialized for our
-efficient equality test and hash functions. 
+efficient equality test and hash functions.
 
 {% highlight ocaml %}
 type bdd = t
@@ -158,20 +158,23 @@ module H2 = struct
     uid a1 = uid a2   && uid b1 = uid b2
   let hash (a,b) = uid a * 17 + uid b
 end
-  
+
 module HT2 = Hashtbl.Make(H2)
 {% endhighlight %}
 
 We are now ready to implement the function that tie the knot of an
-open recursive function. 
+open recursive function.
 
 {% highlight ocaml %}
-let memo_rec2 f = 
-  let h = HT2.create 1337 in 
-  let rec g x y = 
+let memo_rec2 f =
+  let h = HT2.create 1337 in
+  let rec g x y =
     try HT2.find h (x,y)
-    with Not_found ->  f g x y
-  in 
+    with Not_found ->
+    let r = f g x y in
+    HT2.add h (x,y) r;
+    r
+  in
   g
 
 let andb = memo_rec2 andb
@@ -204,6 +207,7 @@ called ephemerons, which make it possible to automatically reclaim the
 stale bindings that are stored in the memoization tables. We will come
 back to this subject in a future post.
 
+**Update** Corrected a mistake in the `memo_rec2` code (thanks to a redditer). Never post when tired.
 
 
 
