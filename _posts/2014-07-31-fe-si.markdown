@@ -1,0 +1,25 @@
+---
+layout: post
+title:  "Unarchiving Fe-Si: formally verified hardware synthesis in Coq."
+date:   2014-07-31 20:00:00
+categories: update
+---
+
+[Adam Chlipala](http://adam.chlipala.net/) just pointed me out that
+the source code for our joint paper at CAV 2013 was not available
+anymore on the web. This is due to the fact that my old web-page at
+Inria was removed. So, I am delighted to take this as an opportunity
+to make the Fe-Si git repository available on github!
+
+Fe-Si is a simplified version of Bluespec, an hardware description
+language based on a notion of *guarded atomic actions*. Fe-Si is
+defined as a dependently typed deep embedding in Coq. It comes with a
+compiler whose target corresponds to a synthesisable subset of Verilog
+or VHDL. A key aspect of our approach is that input programs for the
+compiler can be defined and proved correct inside Coq. Then, we use
+extraction and a Verilog backend (written in OCaml) to generate a
+certified version of an hardware design.
+
+You can find more in our CAV paper
+([.pdf](http://arxiv.org/pdf/1301.4779v1)) or in the git repository of
+the project ([.git](https://github.com/braibant/Synthesis)).
